@@ -5,7 +5,20 @@ export default defineConfig({
     {
       format: 'esm',
       syntax: ['node 18'],
-      dts: true,
+      dts: false,
     },
   ],
+  tools: {
+    rspack: (config, { rspack }) => {
+      config.plugins ??= [];
+      config.plugins.push(
+        new rspack.BannerPlugin({
+          banner: '#!/usr/bin/env node',
+          raw: true,
+          entryOnly: true,
+        }),
+      );
+      return config;
+    },
+  },
 });
