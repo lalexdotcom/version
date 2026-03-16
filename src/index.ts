@@ -134,7 +134,12 @@ function resolvePackageManagerVersion(pm: string): string {
       return match[2];
     }
   }
-  return execSync(`${pm} --version`, { encoding: 'utf-8' }).trim();
+  // COREPACK_ENABLE_PROJECT_SPEC=0 tells corepack to ignore the packageManager
+  // field in package.json — otherwise it may refuse to run the wrong PM.
+  return execSync(`${pm} --version`, {
+    encoding: 'utf-8',
+    env: { ...process.env, COREPACK_ENABLE_PROJECT_SPEC: '0' },
+  }).trim();
 }
 
 // Detect the package manager name and version from the running process
