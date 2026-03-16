@@ -1,5 +1,6 @@
 import { execSync } from 'node:child_process';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { isCancel, select } from '@clack/prompts';
 import { Command, InvalidArgumentError } from 'commander';
@@ -134,10 +135,11 @@ function resolvePackageManagerVersion(pm: string): string {
       return match[2];
     }
   }
-  // COREPACK_ENABLE_PROJECT_SPEC=0 tells corepack to ignore the packageManager
-  // field in package.json — otherwise it may refuse to run the wrong PM.
+  // Run from os.tmpdir() so neither corepack nor pnpm itself finds a package.json
+  // with a conflicting packageManager field and refuses to run.
   return execSync(`${pm} --version`, {
     encoding: 'utf-8',
+    cwd: os.tmpdir(),
     env: { ...process.env, COREPACK_ENABLE_PROJECT_SPEC: '0' },
   }).trim();
 }
