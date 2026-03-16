@@ -135,11 +135,17 @@ function resolvePackageManagerVersion(pm: string): string {
       return match[2];
     }
   }
-  // Run from os.tmpdir() so neither corepack nor pnpm itself finds a package.json
+  // Use a dedicated sandbox dir so neither corepack nor pnpm finds a package.json
   // with a conflicting packageManager field and refuses to run.
+  const sandboxDir = path.join(os.tmpdir(), '@lalex-version-sandbox');
+  fs.mkdirSync(sandboxDir, { recursive: true });
+  const sandboxPkg = path.join(sandboxDir, 'package.json');
+  if (fs.existsSync(sandboxPkg)) {
+    fs.rmSync(sandboxPkg);
+  }
   return execSync(`${pm} --version`, {
     encoding: 'utf-8',
-    cwd: os.tmpdir(),
+    cwd: sandboxDir,
     env: { ...process.env, COREPACK_ENABLE_PROJECT_SPEC: '0' },
   }).trim();
 }
