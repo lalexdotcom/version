@@ -24,7 +24,8 @@
 		"dev": "rslib build --watch",
 		"format": "biome format --write",
 		"test": "rstest",
-		"test:watch": "rstest --watch"
+		"test:watch": "rstest --watch",
+		"version": "tsx src/index.ts"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.4.6",

@@ -349,6 +349,39 @@ describe('error cases', () => {
     expect(status).toBe(1);
     expect(stderr).toContain('stable version');
   });
+
+  test('uncommitted changes without --commit exits with code 1', () => {
+    const pkgPath = path.join(dir, 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+    pkg.description = 'dirty';
+    fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, '\t') + '\n');
+    const { stderr, status } = run(
+      ['--non-interactive', '--dry-run', '--bump', 'patch', '--ignore-pm'],
+      dir,
+    );
+    expect(status).toBe(1);
+    expect(stderr).toContain('uncommitted changes');
+  });
+
+  test('uncommitted changes with --commit proceeds normally', () => {
+    const pkgPath = path.join(dir, 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+    pkg.description = 'dirty';
+    fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, '\t') + '\n');
+    const { stdout, status } = run(
+      [
+        '--non-interactive',
+        '--dry-run',
+        '--bump',
+        'patch',
+        '--ignore-pm',
+        '--commit',
+      ],
+      dir,
+    );
+    expect(status).toBe(0);
+    expect(strip(stdout)).toContain('version update: 1.0.0 => 1.0.1');
+  });
 });
 
 // ─── Non-interactive without dry-run (real writes) ───────────────────────────

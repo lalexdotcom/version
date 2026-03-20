@@ -104,7 +104,7 @@ npx @lalex/version --bump patch --commit
 
 ## Git behaviour
 
-- If the repository has **uncommitted changes**, the tool prompts to include them in the release commit (or use `--commit` to accept automatically).
+- The repository **must be clean** (no uncommitted changes) before running a version bump. Use `--commit` to bypass this check and include any uncommitted changes in the release commit.
 - The commit message is `Release version <x.y.z>`.
 - The tag follows the format `v<x.y.z>` (e.g. `v1.3.0-beta.2`).
 - Push sends `origin main` and, if a tag was created, `origin v<x.y.z>`.

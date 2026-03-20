@@ -54,7 +54,7 @@ program
       return value;
     },
   )
-  .option('--commit', 'Auto-confirm uncommitted changes prompt', false)
+  .option('--commit', 'Commit uncommitted changes together with the version bump', false)
   .option('--ignore-pm', 'Skip updating the packageManager field', false)
   .option('--no-pm', 'Remove the packageManager field')
   .parse();
@@ -662,39 +662,17 @@ async function main() {
   } catch {
     hasUncommittedChanges = true;
 
-    let shouldCommit: boolean;
-    if (options.commit) {
-      shouldCommit = true;
-    } else if (isNonInteractive) {
-      console.error(
-        'cannot proceed with uncommitted changes. use --commit to include them.',
-      );
-      process.exit(1);
-    } else {
-      const { confirm } = await import('@clack/prompts');
-      const result = await confirm({
-        message:
-          'Do you want to commit all changes together with the version bump?',
-        active: 'Yes',
-        inactive: 'No',
-      });
-      if (isCancel(result)) {
-        console.log('Release cancelled');
-        process.exit(0);
-      }
-      shouldCommit = result;
-    }
-    if (!shouldCommit) {
+    if (!options.commit) {
       if (isNonInteractive) {
         console.error(
-          'cannot proceed with uncommitted changes. please commit them first.',
+          'cannot proceed with uncommitted changes. use --commit to include them.',
         );
-        process.exit(1);
+      } else {
+        console.log(
+          '\x1b[33m◆ Aborted — please commit your changes first.\x1b[0m',
+        );
       }
-      console.log(
-        '\x1b[33m◆ Aborted — please commit your changes first.\x1b[0m',
-      );
-      process.exit(0);
+      process.exit(1);
     }
   }
 
