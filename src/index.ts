@@ -178,6 +178,16 @@ function detectPackageManager(): string {
   return `npm@${resolvePackageManagerVersion('npm')}`;
 }
 
+// Check if git is installed and the cwd is inside a git repository
+function isGitRepo(): boolean {
+  try {
+    execSync('git rev-parse --git-dir', { stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Validate semantic version format
 function validateVersion(version: string): { valid: boolean; error?: string } {
   // Format: x.y.z or x.y.z-<level>.<n>
@@ -617,12 +627,19 @@ async function main() {
   const loggerActive = isNonInteractive || verbose;
   const { log, warn } = createLogger(modeConfig, dryRun, loggerActive);
 
+  const gitAvailable = isGitRepo();
+
   if (!isNonInteractive) {
     console.log(
       dryRun
         ? '\n=== Release Script (DRY RUN) ==='
         : '\n=== Release Script ===',
     );
+    if (!gitAvailable) {
+      console.log('\x1b[33m⚠ Not in a git repository — git operations will be skipped.\x1b[0m');
+    }
+  } else if (!gitAvailable && verbose) {
+    console.warn('git not available — skipping commit, tag and push');
   }
 
   // ── Phase 1: Gather all inputs (silently) ───────────────────────────────
@@ -657,22 +674,36 @@ async function main() {
   }
 
   let hasUncommittedChanges = false;
-  try {
-    execSync('git diff-index --quiet HEAD --', { stdio: 'pipe' });
-  } catch {
-    hasUncommittedChanges = true;
-
-    if (!options.commit) {
-      if (isNonInteractive) {
-        console.error(
-          'cannot proceed with uncommitted changes. use --commit to include them.',
-        );
-      } else {
-        console.log(
-          '\x1b[33m◆ Aborted — please commit your changes first.\x1b[0m',
-        );
+  if (gitAvailable) {
+    // Check whether HEAD exists (repo may have no commits yet)
+    const hasHead = (() => {
+      try {
+        execSync('git rev-parse --verify HEAD', { stdio: 'pipe' });
+        return true;
+      } catch {
+        return false;
       }
-      process.exit(1);
+    })();
+
+    if (hasHead) {
+      try {
+        execSync('git diff-index --quiet HEAD --', { stdio: 'pipe' });
+      } catch {
+        hasUncommittedChanges = true;
+
+        if (!options.commit) {
+          if (isNonInteractive) {
+            console.error(
+              'cannot proceed with uncommitted changes. use --commit to include them.',
+            );
+          } else {
+            console.log(
+              '\x1b[33m◆ Aborted — please commit your changes first.\x1b[0m',
+            );
+          }
+          process.exit(1);
+        }
+      }
     }
   }
 
@@ -699,8 +730,8 @@ async function main() {
     clackLog.step(`Version update: ${currentVersion} → ${newVersion}`);
   }
 
-  let createTag = options.tag;
-  if (!isNonInteractive && !options.tag) {
+  let createTag = gitAvailable && options.tag;
+  if (gitAvailable && !isNonInteractive && !options.tag) {
     const result = await confirm({
       message: `Create git tag #v${newVersion}?`,
       active: 'Yes',
@@ -713,8 +744,8 @@ async function main() {
     createTag = result;
   }
 
-  let pushToRemote = options.push;
-  if (!isNonInteractive && !options.push) {
+  let pushToRemote = gitAvailable && options.push;
+  if (gitAvailable && !isNonInteractive && !options.push) {
     const result = await confirm({
       message: 'Push to remote?',
       active: 'Yes',
@@ -746,7 +777,7 @@ async function main() {
 
   // ── Phase 3: Execute ─────────────────────────────────────────────────────
   log();
-  if (!hasUncommittedChanges) {
+  if (gitAvailable && !hasUncommittedChanges) {
     log('workingDirClean');
   }
   log('newVersion', { from: currentVersion, to: newVersion });
@@ -805,28 +836,30 @@ async function main() {
     log('packageManagerSet', { pm: detectPackageManager() });
   }
 
-  log('committing');
-  if (!dryRun) {
-    try {
-      if (hasUncommittedChanges) {
-        execSync('git add .', { stdio: 'pipe' });
-      } else {
-        const filesToAdd = ['package.json'];
-        const lockFile = 'pnpm-lock.yaml';
-        if (fs.existsSync(path.join(process.cwd(), lockFile))) {
-          filesToAdd.push(lockFile);
+  if (gitAvailable) {
+    log('committing');
+    if (!dryRun) {
+      try {
+        if (hasUncommittedChanges) {
+          execSync('git add .', { stdio: 'pipe' });
+        } else {
+          const filesToAdd = ['package.json'];
+          const lockFile = 'pnpm-lock.yaml';
+          if (fs.existsSync(path.join(process.cwd(), lockFile))) {
+            filesToAdd.push(lockFile);
+          }
+          execSync(`git add ${filesToAdd.join(' ')}`, { stdio: 'pipe' });
         }
-        execSync(`git add ${filesToAdd.join(' ')}`, { stdio: 'pipe' });
+        execSync(`git commit -m "Release version ${newVersion}"`, {
+          stdio: 'pipe',
+        });
+        committed = true;
+      } catch (e) {
+        rollback('commit', e as Error);
       }
-      execSync(`git commit -m "Release version ${newVersion}"`, {
-        stdio: 'pipe',
-      });
-      committed = true;
-    } catch (e) {
-      rollback('commit', e as Error);
     }
+    log('committed');
   }
-  log('committed');
 
   if (createTag) {
     log('creatingTag', { version: newVersion });
