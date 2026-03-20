@@ -686,23 +686,25 @@ async function main() {
     })();
 
     if (hasHead) {
-      try {
-        execSync('git diff-index --quiet HEAD --', { stdio: 'pipe' });
-      } catch {
-        hasUncommittedChanges = true;
+      // git status --porcelain refreshes the index before comparing, avoiding
+      // false positives from stale stat cache (e.g. after npx touches file mtimes)
+      const statusOutput = execSync('git status --porcelain', {
+        encoding: 'utf-8',
+        stdio: 'pipe',
+      });
+      hasUncommittedChanges = statusOutput.trim().length > 0;
 
-        if (!options.commit) {
-          if (isNonInteractive) {
-            console.error(
-              'cannot proceed with uncommitted changes. use --commit to include them.',
-            );
-          } else {
-            console.log(
-              '\x1b[33m◆ Aborted — please commit your changes first.\x1b[0m',
-            );
-          }
-          process.exit(1);
+      if (hasUncommittedChanges && !options.commit) {
+        if (isNonInteractive) {
+          console.error(
+            'cannot proceed with uncommitted changes. use --commit to include them.',
+          );
+        } else {
+          console.log(
+            '\x1b[33m◆ Aborted — please commit your changes first.\x1b[0m',
+          );
         }
+        process.exit(1);
       }
     }
   }
