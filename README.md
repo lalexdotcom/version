@@ -5,7 +5,7 @@ A CLI utility for semantic version management in Node.js projects. It updates `p
 ## Installation
 
 ```bash
-npx @lalex/version
+npx @lalex/version@latest
 ```
 
 Or globally:
@@ -19,7 +19,7 @@ npm install -g @lalex/version
 ### Interactive mode
 
 ```bash
-npx @lalex/version
+npx @lalex/version@latest
 ```
 
 A guided menu walks you through the release:
@@ -34,7 +34,7 @@ A guided menu walks you through the release:
 All decisions can be passed as flags for automated pipelines.
 
 ```bash
-npx @lalex/version --non-interactive --bump patch --tag --push
+npx @lalex/version@latest --non-interactive --bump patch --tag --push
 ```
 
 ## Options
@@ -84,22 +84,22 @@ Prerelease levels follow the order `alpha` → `beta` → `rc`. Regressions are 
 
 ```bash
 # Interactive patch bump
-npx @lalex/version
+npx @lalex/version@latest
 
 # Minor bump, create tag, push — no prompts
-npx @lalex/version --non-interactive --bump minor --tag --push
+npx @lalex/version@latest --non-interactive --bump minor --tag --push
 
 # Set version explicitly to 2.0.0
-npx @lalex/version --version 2.0.0
+npx @lalex/version@latest --version 2.0.0
 
 # Simulate a major bump with tag, no changes made
-npx @lalex/version --dry-run --bump major --tag --push
+npx @lalex/version@latest --dry-run --bump major --tag --push
 
 # Finalize a prerelease (alpha.3 → stable)
-npx @lalex/version --non-interactive --bump release --tag --push
+npx @lalex/version@latest --non-interactive --bump release --tag --push
 
 # Patch bump including uncommitted files
-npx @lalex/version --bump patch --commit
+npx @lalex/version@latest --bump patch --commit
 ```
 
 ## Git behaviour
