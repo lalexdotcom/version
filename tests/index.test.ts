@@ -435,3 +435,37 @@ describe('non-interactive real run', () => {
     expect(updated.packageManager).toBeUndefined();
   });
 });
+
+// ─── Rollback on error ────────────────────────────────────────────────────────
+
+describe('rollback on error', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = createTempRepo('1.0.0');
+  });
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('existing tag rolls back commit and package.json', () => {
+    // Pre-create the tag that will conflict
+    execSync('git tag v1.0.1', { cwd: dir, stdio: 'pipe' });
+
+    const pkgPath = path.join(dir, 'package.json');
+    const { stderr, status } = run(
+      ['--non-interactive', '--bump', 'patch', '--ignore-pm', '--tag'],
+      dir,
+    );
+
+    expect(status).toBe(1);
+    expect(stderr).toContain('create tag');
+
+    // package.json must be back to original version
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+    expect(pkg.version).toBe('1.0.0');
+
+    // The release commit must have been rolled back (only the initial commit)
+    const log = execSync('git log --oneline', { cwd: dir, encoding: 'utf-8' });
+    expect(log.trim().split('\n')).toHaveLength(1);
+  });
+});

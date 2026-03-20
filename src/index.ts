@@ -752,20 +752,50 @@ async function main() {
   log('newVersion', { from: currentVersion, to: newVersion });
   log();
 
+  const packagePath = path.join(process.cwd(), 'package.json');
+  const originalPackageJson = fs.readFileSync(packagePath, 'utf-8');
+  let packageJsonUpdated = false;
+  let committed = false;
+  let tagged = false;
+
+  const rollback = (step: string, err: Error): never => {
+    try {
+      if (tagged) execSync(`git tag -d v${newVersion}`, { stdio: 'pipe' });
+    } catch {}
+    try {
+      if (committed) execSync('git reset HEAD~1', { stdio: 'pipe' });
+    } catch {}
+    try {
+      if (packageJsonUpdated) fs.writeFileSync(packagePath, originalPackageJson);
+    } catch {}
+    const rolledBack = packageJsonUpdated || committed || tagged;
+    if (isNonInteractive) {
+      console.error(`error at "${step}": ${err.message}`);
+    } else {
+      console.log(`\n\x1b[31m✗ Error at "${step}": ${err.message}\x1b[0m`);
+      if (rolledBack) console.log('\x1b[33m◆ Changes have been rolled back.\x1b[0m');
+    }
+    process.exit(1);
+  };
+
   log('updatingPackageJson');
   if (!dryRun) {
-    const packagePath = path.join(process.cwd(), 'package.json');
-    const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf-8'));
-    packageJson.version = newVersion;
-    if (options.pm === false) {
-      delete packageJson.packageManager;
-    } else if (!options.ignorePm) {
-      packageJson.packageManager = detectPackageManager();
+    try {
+      const packageJson = JSON.parse(originalPackageJson);
+      packageJson.version = newVersion;
+      if (options.pm === false) {
+        delete packageJson.packageManager;
+      } else if (!options.ignorePm) {
+        packageJson.packageManager = detectPackageManager();
+      }
+      fs.writeFileSync(
+        packagePath,
+        `${JSON.stringify(packageJson, null, '\t')}\n`,
+      );
+      packageJsonUpdated = true;
+    } catch (e) {
+      rollback('update package.json', e as Error);
     }
-    fs.writeFileSync(
-      packagePath,
-      `${JSON.stringify(packageJson, null, '\t')}\n`,
-    );
   }
   if (options.pm === false) {
     log('packageManagerRemoved');
@@ -777,26 +807,36 @@ async function main() {
 
   log('committing');
   if (!dryRun) {
-    if (hasUncommittedChanges) {
-      execSync('git add .', { stdio: 'pipe' });
-    } else {
-      const filesToAdd = ['package.json'];
-      const lockFile = 'pnpm-lock.yaml';
-      if (fs.existsSync(path.join(process.cwd(), lockFile))) {
-        filesToAdd.push(lockFile);
+    try {
+      if (hasUncommittedChanges) {
+        execSync('git add .', { stdio: 'pipe' });
+      } else {
+        const filesToAdd = ['package.json'];
+        const lockFile = 'pnpm-lock.yaml';
+        if (fs.existsSync(path.join(process.cwd(), lockFile))) {
+          filesToAdd.push(lockFile);
+        }
+        execSync(`git add ${filesToAdd.join(' ')}`, { stdio: 'pipe' });
       }
-      execSync(`git add ${filesToAdd.join(' ')}`, { stdio: 'pipe' });
+      execSync(`git commit -m "Release version ${newVersion}"`, {
+        stdio: 'pipe',
+      });
+      committed = true;
+    } catch (e) {
+      rollback('commit', e as Error);
     }
-    execSync(`git commit -m "Release version ${newVersion}"`, {
-      stdio: 'pipe',
-    });
   }
   log('committed');
 
   if (createTag) {
     log('creatingTag', { version: newVersion });
     if (!dryRun) {
-      execSync(`git tag v${newVersion}`, { stdio: 'pipe' });
+      try {
+        execSync(`git tag v${newVersion}`, { stdio: 'pipe' });
+        tagged = true;
+      } catch (e) {
+        rollback('create tag', e as Error);
+      }
     }
     log('tagCreated', { version: newVersion });
   }
@@ -804,9 +844,13 @@ async function main() {
   if (pushToRemote) {
     log('pushing');
     if (!dryRun) {
-      execSync('git push origin main', { stdio: 'pipe' });
-      if (createTag) {
-        execSync(`git push origin v${newVersion}`, { stdio: 'pipe' });
+      try {
+        execSync('git push origin main', { stdio: 'pipe' });
+        if (createTag) {
+          execSync(`git push origin v${newVersion}`, { stdio: 'pipe' });
+        }
+      } catch (e) {
+        rollback('push', e as Error);
       }
     }
     log('pushed', { withTag: String(createTag), version: newVersion });
