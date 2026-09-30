@@ -7,4 +7,8 @@
 5. Commit only when the user asks; Conventional Commits.
 
 ## "On clôture" (user's closing command)
-Means, without presenting the finishing-a-development-branch menu: update the Serena memories, commit whatever is still uncommitted (split into Conventional Commits), then merge the feature branch into `main` locally (superpowers option 1: tests on the merged result, delete the branch). Do not push.
+Means, without presenting the finishing-a-development-branch menu, in this order:
+1. Commit whatever is still pending on the feature branch (split into Conventional Commits).
+2. Merge it into `main` locally with `git merge --no-ff` (superpowers option 1: run the tests on the merged result, then delete the branch).
+3. Update the Serena memories on `main`, after the merge, and commit them there.
+Do not push.
