@@ -184,6 +184,8 @@ describe("packageManager field (dry-run)", () => {
 
 	test("detects pnpm from pnpm-lock.yaml", () => {
 		fs.writeFileSync(path.join(dir, "pnpm-lock.yaml"), 'lockfileVersion: "9.0"\n');
+		execSync("git add .", { cwd: dir, stdio: "pipe" });
+		execSync('git commit -m "add lockfile"', { cwd: dir, stdio: "pipe" });
 		const { stdout, status } = run(["--non-interactive", "--dry-run", "--bump", "patch"], dir);
 		expect(status).toBe(0);
 		expect(strip(stdout)).toMatch(/packageManager set to pnpm@\d+\.\d+\.\d+/);
