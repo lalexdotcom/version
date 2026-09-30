@@ -3,6 +3,8 @@
 - `pnpm run build` — Rslib build to `dist/` (required before tests).
 - `pnpm run dev` — build in watch mode.
 - `pnpm run test` / `pnpm run test:watch` — Rstest (runs `dist/index.js`).
+- `pnpm run coverage` — `COVERAGE=1` build (source maps) + c8 around rstest; report on `src/index.ts` in the terminal and `coverage/`. Leaves `dist/index.js.map` behind until the next `pnpm run build`.
+- `pnpm run scratchpad` — regenerate `.scratchpad/` fixture repos (one git repo per CHANGELOG case) for manual interactive runs: `../../node_modules/.bin/tsx ../../src/index.ts` from a fixture.
 - `pnpm run lint` — Biome lint.
 - `pnpm run format` — Biome format (write).
 - `pnpm run check` — Biome lint + format with fixes.

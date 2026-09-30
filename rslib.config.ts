@@ -8,6 +8,12 @@ export default defineConfig({
 			dts: false,
 		},
 	],
+	// Tests run dist/index.js: source maps let c8 report on src/index.ts, and are kept out of
+	// the published build, which ships dist/ as is
+	output: { sourceMap: process.env.COVERAGE ? { js: "source-map" } : false },
+	// Rslib turns the build cache on, and its key ignores env vars: without this, a coverage build
+	// is served the cached output without source map
+	performance: { buildCache: { cacheDigest: [process.env.COVERAGE] } },
 	tools: {
 		rspack: (config, { rspack }) => {
 			config.plugins ??= [];

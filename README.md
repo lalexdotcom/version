@@ -145,5 +145,7 @@ pnpm install
 pnpm tsx src/index.ts   # run in development
 pnpm run build          # compile to dist/
 pnpm run test           # run tests
+pnpm run coverage       # run tests with a coverage report (terminal + coverage/index.html)
+pnpm run scratchpad     # regenerate the .scratchpad/ fixture repos for manual testing
 pnpm run lint           # lint the code
 ```
