@@ -51,6 +51,8 @@ npx upversion@latest --non-interactive --bump patch --tag --push
 | `--verbose` | Show detailed step-by-step output |
 | `--ignore-pm` | Skip updating the `packageManager` field |
 | `--no-pm` | Remove the `packageManager` field from `package.json` |
+| `--skip-changelog` | Do not check or update the CHANGELOG |
+| `--no-auto-unreleased-bump` | In non-interactive mode, fail instead of adding a CHANGELOG section for the new version |
 
 ## Bump types (`--bump`)
 
@@ -115,6 +117,22 @@ On each run, the `packageManager` field in `package.json` is updated with the de
 
 - `--ignore-pm`: leave the field unchanged
 - `--no-pm`: remove the field entirely
+
+## CHANGELOG
+
+Each release checks the project's `CHANGELOG.md` (or `CHANGELOG`; `CHANGELOG.md` wins when both exist) for a `## [<version>]` section. The file is expected in [Keep a Changelog](https://keepachangelog.com) format.
+
+- **Section already present**: the file is left untouched.
+- **`[Unreleased]` has entries**: they are moved under a new `## [<version>] - YYYY-MM-DD` heading and an empty `## [Unreleased]` is kept.
+- **`[Unreleased]` is empty or missing**: a generic `## [<version>] - YYYY-MM-DD` section with the text `Release <version>` is added before the previous release.
+- **No file**: interactive mode offers to create a `CHANGELOG.md` with a generic entry (default: no). Non-interactive mode does nothing.
+- **File not in Keep a Changelog format**: interactive mode asks whether to continue (default: no). Non-interactive mode does nothing.
+
+When a section is added, the compare links at the bottom (`[unreleased]: …/compare/vX...HEAD`) are updated and the file is included in the release commit. Interactive mode asks before adding a section; if you decline, it asks whether to release without a CHANGELOG entry (default: no). Non-interactive mode adds it (with a warning for a generic section) unless `--no-auto-unreleased-bump` is passed, in which case the release fails.
+
+Releasing a stable version after prereleases (e.g. `1.2.0` with `1.2.0-beta.1` sections present) does **not** consolidate the prerelease sections. Interactive mode asks for confirmation; non-interactive mode prints a warning.
+
+`--skip-changelog` disables all of the above.
 
 ## Development
 

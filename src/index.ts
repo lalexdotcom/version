@@ -25,6 +25,8 @@ interface CLIOptions {
 	commit: boolean;
 	ignorePm: boolean;
 	pm: boolean;
+	skipChangelog: boolean;
+	autoUnreleasedBump: boolean;
 }
 
 const program = new Command();
@@ -52,6 +54,11 @@ program
 	.option("--commit", "Commit uncommitted changes together with the version bump", false)
 	.option("--ignore-pm", "Skip updating the packageManager field", false)
 	.option("--no-pm", "Remove the packageManager field")
+	.option("--skip-changelog", "Do not check or update the CHANGELOG", false)
+	.option(
+		"--no-auto-unreleased-bump",
+		"In non-interactive mode, fail instead of adding a CHANGELOG section for the new version",
+	)
 	.parse();
 
 function parseCLIOptions(): CLIOptions {
@@ -474,6 +481,215 @@ async function selectBumpType(currentVersion: string): Promise<string> {
 	return selectBumpTypeStable(currentVersion);
 }
 
+// ─── CHANGELOG (Keep a Changelog) ─────────────────────────────────────────────
+const CHANGELOG_HEADER = `# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+`;
+
+interface ChangelogUpdate {
+	path: string;
+	// null when the file is created, so rollback deletes it instead of restoring it
+	original: string | null;
+	updated: string;
+	change: string;
+}
+
+// Locate the changelog file; CHANGELOG.md wins when both exist
+function findChangelog(): string | null {
+	for (const name of ["CHANGELOG.md", "CHANGELOG"]) {
+		const file = path.join(process.cwd(), name);
+		if (fs.existsSync(file)) return file;
+	}
+	return null;
+}
+
+// Escape a string for literal use inside a RegExp
+function escapeRegExp(s: string): string {
+	return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// A changelog without any "## [Unreleased]" or "## [x.y.z]" heading is not ours to edit
+function isKeepAChangelog(content: string): boolean {
+	return /^## \[(unreleased|\d+\.\d+\.\d+[^\]]*)\]/im.test(content);
+}
+
+// Check whether the changelog already has a heading for this exact version
+function hasVersionSection(content: string, version: string): boolean {
+	return new RegExp(`^## \\[${escapeRegExp(version)}\\]`, "m").test(content);
+}
+
+// Locate the [Unreleased] body: it ends at the next release heading or at the link references
+function findUnreleased(content: string): { headingEnd: number; body: string } | null {
+	const heading = /^## \[unreleased\][^\n]*/im.exec(content);
+	if (!heading) return null;
+	const headingEnd = heading.index + heading[0].length;
+	const rest = content.slice(headingEnd);
+	const end = rest.search(/^(## |\[[^\]]+\]:)/m);
+	return { headingEnd, body: end === -1 ? rest : rest.slice(0, end) };
+}
+
+// Template subsection headings ("### Added") left without items do not count as entries
+function hasEntries(body: string): boolean {
+	return body.split("\n").some((line) => line.trim() !== "" && !line.startsWith("### "));
+}
+
+// List prerelease headings (e.g. 1.2.0-beta.1) of a stable version
+function findPrereleaseSections(content: string, version: string): string[] {
+	const re = new RegExp(`^## \\[(${escapeRegExp(version)}-[^\\]]+)\\]`, "gm");
+	return Array.from(content.matchAll(re), (m) => m[1]);
+}
+
+// Local date, not toISOString(): a release made late in the evening must not be dated tomorrow
+function localDate(): string {
+	const d = new Date();
+	const pad = (n: number) => String(n).padStart(2, "0");
+	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// Move [Unreleased] entries under a new version heading and re-point the compare links
+function assignUnreleased(content: string, version: string): string {
+	const unreleased = findUnreleased(content);
+	if (!unreleased) return content;
+	const { headingEnd } = unreleased;
+	return updateCompareLinks(
+		`${content.slice(0, headingEnd)}\n\n## [${version}] - ${localDate()}${content.slice(headingEnd)}`,
+		version,
+	);
+}
+
+// Re-point the [unreleased] compare link to the new tag and add the link of the new version
+function updateCompareLinks(content: string, version: string): string {
+	return content.replace(
+		/^\[(unreleased)\]:\s*(\S+\/compare\/)(\S+)\.\.\.HEAD$/im,
+		(_, label, base, previous) =>
+			`[${label}]: ${base}v${version}...HEAD\n[${version}]: ${base}${previous}...v${version}`,
+	);
+}
+
+// Placeholder section for a release that has no entries
+function genericSection(version: string): string {
+	return `## [${version}] - ${localDate()}\n\nRelease ${version}`;
+}
+
+// Insert a generic section before the first release; empty [Unreleased] subsections stay where they are
+function addGenericSection(content: string, version: string): string {
+	const next = /^(## \[(?!unreleased\])|\[[^\]]+\]:)/im.exec(content);
+	const at = next ? next.index : content.length;
+	const before = content.slice(0, at).replace(/\n*$/, "\n\n");
+	const after = content.slice(at);
+	const section = genericSection(version);
+	return updateCompareLinks(
+		after ? `${before}${section}\n\n${after}` : `${before}${section}\n`,
+		version,
+	);
+}
+
+// Decide the CHANGELOG change before any write, so a refusal aborts with nothing to roll back
+async function resolveChangelog(newVersion: string): Promise<ChangelogUpdate | null> {
+	if (options.skipChangelog) return null;
+
+	const { confirm } = await import("@clack/prompts");
+	const ask = async (message: string, initialValue: boolean): Promise<boolean> => {
+		const result = await confirm({ message, active: "Yes", inactive: "No", initialValue });
+		if (isCancel(result)) {
+			console.log("Release cancelled");
+			process.exit(0);
+		}
+		return result;
+	};
+	const abort = (): never => {
+		console.log("\x1b[33m◆ Aborted.\x1b[0m");
+		process.exit(0);
+	};
+
+	const file = findChangelog();
+	if (!file) {
+		// Creating a file nobody asked for is fine behind a prompt, not silently in CI
+		if (isNonInteractive) return null;
+		const create = await ask(
+			`No CHANGELOG found. Create one with a generic "Release ${newVersion}" entry?`,
+			false,
+		);
+		if (!create) return null;
+		return {
+			path: path.join(process.cwd(), "CHANGELOG.md"),
+			original: null,
+			updated: `${CHANGELOG_HEADER}## [Unreleased]\n\n${genericSection(newVersion)}\n`,
+			change: `created with a generic ${newVersion} section`,
+		};
+	}
+
+	const name = path.basename(file);
+	const original = fs.readFileSync(file, "utf-8");
+	if (!isKeepAChangelog(original)) {
+		if (isNonInteractive) return null;
+		if (!(await ask(`${name} is not in Keep a Changelog format. Continue anyway?`, false))) abort();
+		return null;
+	}
+	if (hasVersionSection(original, newVersion)) return null;
+
+	let update: ChangelogUpdate | null = null;
+	const unreleased = findUnreleased(original);
+	if (unreleased && hasEntries(unreleased.body)) {
+		const assign = isNonInteractive
+			? options.autoUnreleasedBump
+			: await ask(`Assign [Unreleased] in ${name} to ${newVersion}?`, true);
+		if (assign) {
+			update = {
+				path: file,
+				original,
+				updated: assignUnreleased(original, newVersion),
+				change: `[Unreleased] assigned to ${newVersion}`,
+			};
+		}
+	} else {
+		const add = isNonInteractive
+			? options.autoUnreleasedBump
+			: await ask(
+					`${name} has no entries for ${newVersion}. Add a generic "Release ${newVersion}" section?`,
+					true,
+				);
+		if (add) {
+			if (isNonInteractive) {
+				console.warn(`${name} has no entries for ${newVersion}: generic section added`);
+			}
+			update = {
+				path: file,
+				original,
+				updated: addGenericSection(original, newVersion),
+				change: `generic ${newVersion} section added`,
+			};
+		}
+	}
+
+	if (!update) {
+		if (isNonInteractive) {
+			console.error(
+				`${name} has no section for ${newVersion}. use --skip-changelog to release without it.`,
+			);
+			process.exit(1);
+		}
+		if (!(await ask(`Release without a CHANGELOG entry for ${newVersion}?`, false))) abort();
+		return null;
+	}
+
+	const prereleases = isPrerelease(newVersion) ? [] : findPrereleaseSections(original, newVersion);
+	if (prereleases.length > 0) {
+		const found = `${prereleases.join(", ")} in ${name}`;
+		if (isNonInteractive) {
+			console.warn(`found ${found}: they will not be consolidated into ${newVersion}`);
+		} else if (!(await ask(`Found ${found} — they will not be consolidated. Continue?`, false))) {
+			abort();
+		}
+	}
+	return update;
+}
+
 // ─── Logger / template system ─────────────────────────────────────────────────
 type MessageKey =
 	| "workingDirClean"
@@ -482,6 +698,7 @@ type MessageKey =
 	| "packageManagerSet"
 	| "packageManagerRemoved"
 	| "packageManagerUnchanged"
+	| "changelogUpdated"
 	| "committing"
 	| "committed"
 	| "creatingTag"
@@ -540,6 +757,7 @@ const interactiveConfig: ModeConfig = {
 		packageManagerSet: ({ pm }) => `✓ packageManager set to ${pm}`,
 		packageManagerRemoved: "✓ packageManager field removed",
 		packageManagerUnchanged: "✓ packageManager field unchanged",
+		changelogUpdated: ({ file, change }) => `✓ ${file}: ${change}`,
 		committing: "→ Committing changes...",
 		committed: "✓ Changes committed",
 		creatingTag: "→ Creating git tag...",
@@ -571,6 +789,7 @@ const nonInteractiveVerboseConfig: ModeConfig = {
 		packageManagerSet: ({ pm }) => `packageManager set to ${pm}`,
 		packageManagerRemoved: "packageManager field removed",
 		packageManagerUnchanged: "packageManager field unchanged",
+		changelogUpdated: ({ file, change }) => `${file}: ${change}`,
 		committing: "committing changes...",
 		committed: "changes committed",
 		creatingTag: ({ version }) => `creating git tag #v${version}...`,
@@ -685,6 +904,8 @@ async function main() {
 		clackLog.step(`Version update: ${currentVersion} → ${newVersion}`);
 	}
 
+	const changelog = await resolveChangelog(newVersion);
+
 	let createTag = gitAvailable && options.tag;
 	if (gitAvailable && !isNonInteractive && !options.tag) {
 		const result = await confirm({
@@ -741,6 +962,7 @@ async function main() {
 	const packagePath = path.join(process.cwd(), "package.json");
 	const originalPackageJson = fs.readFileSync(packagePath, "utf-8");
 	let packageJsonUpdated = false;
+	let changelogUpdated = false;
 	let committed = false;
 	let tagged = false;
 
@@ -754,7 +976,13 @@ async function main() {
 		try {
 			if (packageJsonUpdated) fs.writeFileSync(packagePath, originalPackageJson);
 		} catch {}
-		const rolledBack = packageJsonUpdated || committed || tagged;
+		try {
+			if (changelog && changelogUpdated) {
+				if (changelog.original === null) fs.rmSync(changelog.path);
+				else fs.writeFileSync(changelog.path, changelog.original);
+			}
+		} catch {}
+		const rolledBack = packageJsonUpdated || changelogUpdated || committed || tagged;
 		if (isNonInteractive) {
 			console.error(`error at "${step}": ${err.message}`);
 		} else {
@@ -788,6 +1016,18 @@ async function main() {
 		log("packageManagerSet", { pm: detectPackageManager() });
 	}
 
+	if (changelog) {
+		if (!dryRun) {
+			try {
+				fs.writeFileSync(changelog.path, changelog.updated);
+				changelogUpdated = true;
+			} catch (e) {
+				rollback("update changelog", e as Error);
+			}
+		}
+		log("changelogUpdated", { file: path.basename(changelog.path), change: changelog.change });
+	}
+
 	if (gitAvailable) {
 		log("committing");
 		if (!dryRun) {
@@ -800,6 +1040,7 @@ async function main() {
 					if (fs.existsSync(path.join(process.cwd(), lockFile))) {
 						filesToAdd.push(lockFile);
 					}
+					if (changelog) filesToAdd.push(path.basename(changelog.path));
 					execSync(`git add ${filesToAdd.join(" ")}`, { stdio: "pipe" });
 				}
 				execSync(`git commit -m "Release version ${newVersion}"`, {

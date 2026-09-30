@@ -12,9 +12,9 @@ Single-file CLI (npm package `upversion`, bin name `version`): bumps `package.js
 - `TODO.md` — backlog (e.g. re-tag same version).
 
 ## main() flow (src/index.ts)
-1. Gather inputs: current version, early regression check for `--version`/`--bump`, dirty-tree check (`git status --porcelain`; abort unless `--commit`; skipped if no HEAD), resolve new version (flags or clack menus), tag/push confirms.
+1. Gather inputs: current version, early regression check for `--version`/`--bump`, dirty-tree check (`git status --porcelain`; abort unless `--commit`; skipped if no HEAD), resolve new version (flags or clack menus), `resolveChangelog` (Keep a Changelog: `CHANGELOG.md` > `CHANGELOG`; filled `[Unreleased]` → assigned to the version; empty/missing `[Unreleased]` → generic "Release x.y.z" section; no file → interactive offer to create one; non-KaC file → interactive "continue anyway?"; prerelease-not-consolidated confirm/warning; non-interactive adds sections unless `--no-auto-unreleased-bump` (then exit 1), silent for no file/non-KaC; `--skip-changelog` disables all), tag/push confirms.
 2. Interactive confirmation (skipped in non-interactive and dry-run).
-3. Execute: write package.json (tab indent + trailing `\n`) → `git add` (package.json + pnpm-lock.yaml, or `git add .` with `--commit`) → commit `Release version <v>` → `git tag v<v>` → `git push origin main` (+ tag). Any failure → `rollback()` undoes tag, `git reset HEAD~1`, restores package.json, exit 1.
+3. Execute: write package.json (tab indent + trailing `\n`) → write CHANGELOG if resolved → `git add` (package.json + pnpm-lock.yaml + changelog, or `git add .` with `--commit`) → commit `Release version <v>` → `git tag v<v>` → `git push origin main` (+ tag). Any failure → `rollback()` undoes tag, `git reset HEAD~1`, restores package.json, exit 1.
 - Not in a git repo → git steps silently skipped.
 - Push target hardcoded to `origin main`.
 

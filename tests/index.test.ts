@@ -390,3 +390,219 @@ describe("rollback on error", () => {
 		expect(log.trim().split("\n")).toHaveLength(1);
 	});
 });
+
+// ─── CHANGELOG ────────────────────────────────────────────────────────────────
+
+const LINKS =
+	"[unreleased]: https://github.com/o/r/compare/v1.0.0...HEAD\n" +
+	"[1.0.0]: https://github.com/o/r/releases/tag/v1.0.0\n";
+
+const CHANGELOG_WITH_UNRELEASED = `# Changelog
+
+## [Unreleased]
+
+### Added
+
+- New feature
+
+## [1.0.0] - 2026-01-01
+
+- Initial release
+
+${LINKS}`;
+
+function today(): string {
+	const d = new Date();
+	const pad = (n: number) => String(n).padStart(2, "0");
+	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function commitFile(dir: string, name: string, content: string): string {
+	const file = path.join(dir, name);
+	fs.writeFileSync(file, content);
+	execSync("git add .", { cwd: dir, stdio: "pipe" });
+	execSync(`git commit -m "add ${name}"`, { cwd: dir, stdio: "pipe" });
+	return file;
+}
+
+describe("changelog", () => {
+	let dir: string;
+	beforeEach(() => {
+		dir = createTempRepo("1.0.0");
+	});
+	afterEach(() => {
+		fs.rmSync(dir, { recursive: true, force: true });
+	});
+
+	test("assigns [Unreleased] to the new version and commits it", () => {
+		const file = commitFile(dir, "CHANGELOG.md", CHANGELOG_WITH_UNRELEASED);
+		const { status } = run(["--non-interactive", "--bump", "patch", "--ignore-pm"], dir);
+		expect(status).toBe(0);
+		expect(fs.readFileSync(file, "utf-8")).toContain(
+			`## [Unreleased]\n\n## [1.0.1] - ${today()}\n\n### Added\n\n- New feature\n\n## [1.0.0]`,
+		);
+		const committed = execSync("git show --name-only --format= HEAD", {
+			cwd: dir,
+			encoding: "utf-8",
+		});
+		expect(committed).toContain("CHANGELOG.md");
+	});
+
+	test("updates compare links", () => {
+		const file = commitFile(dir, "CHANGELOG.md", CHANGELOG_WITH_UNRELEASED);
+		run(["--non-interactive", "--bump", "patch", "--ignore-pm"], dir);
+		expect(fs.readFileSync(file, "utf-8")).toContain(
+			"[unreleased]: https://github.com/o/r/compare/v1.0.1...HEAD\n" +
+				"[1.0.1]: https://github.com/o/r/compare/v1.0.0...v1.0.1\n" +
+				"[1.0.0]: https://github.com/o/r/releases/tag/v1.0.0\n",
+		);
+	});
+
+	test("leaves the file untouched when the version already has a section", () => {
+		const content = CHANGELOG_WITH_UNRELEASED.replace(
+			"## [Unreleased]\n",
+			"## [Unreleased]\n\n## [1.0.1] - 2026-02-01\n\n- Fix\n",
+		);
+		const file = commitFile(dir, "CHANGELOG.md", content);
+		const { status } = run(["--non-interactive", "--bump", "patch", "--ignore-pm"], dir);
+		expect(status).toBe(0);
+		expect(fs.readFileSync(file, "utf-8")).toBe(content);
+	});
+
+	test("--no-auto-unreleased-bump without a section exits with code 1", () => {
+		const file = commitFile(dir, "CHANGELOG.md", CHANGELOG_WITH_UNRELEASED);
+		const { stderr, status } = run(
+			["--non-interactive", "--bump", "patch", "--ignore-pm", "--no-auto-unreleased-bump"],
+			dir,
+		);
+		expect(status).toBe(1);
+		expect(stderr).toContain("--skip-changelog");
+		expect(fs.readFileSync(file, "utf-8")).toBe(CHANGELOG_WITH_UNRELEASED);
+		const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf-8"));
+		expect(pkg.version).toBe("1.0.0");
+	});
+
+	test("empty [Unreleased] gets a generic section", () => {
+		const content = CHANGELOG_WITH_UNRELEASED.replace("- New feature\n", "");
+		const file = commitFile(dir, "CHANGELOG.md", content);
+		const { stderr, status } = run(["--non-interactive", "--bump", "patch", "--ignore-pm"], dir);
+		expect(status).toBe(0);
+		expect(stderr).toContain("generic section added");
+		const updated = fs.readFileSync(file, "utf-8");
+		expect(updated).toContain(
+			`## [Unreleased]\n\n### Added\n\n## [1.0.1] - ${today()}\n\nRelease 1.0.1\n\n## [1.0.0]`,
+		);
+		expect(updated).toContain("[1.0.1]: https://github.com/o/r/compare/v1.0.0...v1.0.1\n");
+	});
+
+	test("missing [Unreleased] gets a generic section before the first release", () => {
+		const content = "# Changelog\n\n## [1.0.0] - 2026-01-01\n\n- Initial release\n";
+		const file = commitFile(dir, "CHANGELOG.md", content);
+		const { status } = run(["--non-interactive", "--bump", "patch", "--ignore-pm"], dir);
+		expect(status).toBe(0);
+		expect(fs.readFileSync(file, "utf-8")).toBe(
+			`# Changelog\n\n## [1.0.1] - ${today()}\n\nRelease 1.0.1\n\n## [1.0.0] - 2026-01-01\n\n- Initial release\n`,
+		);
+	});
+
+	test("--no-auto-unreleased-bump with empty [Unreleased] exits with code 1", () => {
+		const content = CHANGELOG_WITH_UNRELEASED.replace("- New feature\n", "");
+		const file = commitFile(dir, "CHANGELOG.md", content);
+		const { stderr, status } = run(
+			["--non-interactive", "--bump", "patch", "--ignore-pm", "--no-auto-unreleased-bump"],
+			dir,
+		);
+		expect(status).toBe(1);
+		expect(stderr).toContain("--skip-changelog");
+		expect(fs.readFileSync(file, "utf-8")).toBe(content);
+	});
+
+	test("--skip-changelog releases without touching the file", () => {
+		const file = commitFile(dir, "CHANGELOG.md", CHANGELOG_WITH_UNRELEASED);
+		const { status } = run(
+			["--non-interactive", "--bump", "patch", "--ignore-pm", "--skip-changelog"],
+			dir,
+		);
+		expect(status).toBe(0);
+		expect(fs.readFileSync(file, "utf-8")).toBe(CHANGELOG_WITH_UNRELEASED);
+	});
+
+	test("ignores a changelog that is not in Keep a Changelog format", () => {
+		const content = "# History\n\n1.0.0: initial release\n";
+		const file = commitFile(dir, "CHANGELOG.md", content);
+		const { status } = run(["--non-interactive", "--bump", "patch", "--ignore-pm"], dir);
+		expect(status).toBe(0);
+		expect(fs.readFileSync(file, "utf-8")).toBe(content);
+	});
+
+	test("dry-run reports the assignment without writing", () => {
+		const file = commitFile(dir, "CHANGELOG.md", CHANGELOG_WITH_UNRELEASED);
+		const { stdout, status } = run(
+			["--non-interactive", "--dry-run", "--bump", "patch", "--ignore-pm"],
+			dir,
+		);
+		expect(status).toBe(0);
+		expect(strip(stdout)).toContain("CHANGELOG.md: [Unreleased] assigned to 1.0.1");
+		expect(fs.readFileSync(file, "utf-8")).toBe(CHANGELOG_WITH_UNRELEASED);
+	});
+
+	test("uses CHANGELOG without extension", () => {
+		const file = commitFile(dir, "CHANGELOG", CHANGELOG_WITH_UNRELEASED);
+		const { status } = run(["--non-interactive", "--bump", "patch", "--ignore-pm"], dir);
+		expect(status).toBe(0);
+		expect(fs.readFileSync(file, "utf-8")).toContain(`## [1.0.1] - ${today()}`);
+	});
+
+	test("CHANGELOG.md takes precedence over CHANGELOG", () => {
+		const md = commitFile(dir, "CHANGELOG.md", CHANGELOG_WITH_UNRELEASED);
+		const plain = commitFile(dir, "CHANGELOG", CHANGELOG_WITH_UNRELEASED);
+		const { status } = run(["--non-interactive", "--bump", "patch", "--ignore-pm"], dir);
+		expect(status).toBe(0);
+		expect(fs.readFileSync(md, "utf-8")).toContain(`## [1.0.1] - ${today()}`);
+		expect(fs.readFileSync(plain, "utf-8")).toBe(CHANGELOG_WITH_UNRELEASED);
+	});
+
+	test("rollback restores the changelog", () => {
+		const file = commitFile(dir, "CHANGELOG.md", CHANGELOG_WITH_UNRELEASED);
+		execSync("git tag v1.0.1", { cwd: dir, stdio: "pipe" });
+		const { status } = run(["--non-interactive", "--bump", "patch", "--ignore-pm", "--tag"], dir);
+		expect(status).toBe(1);
+		expect(fs.readFileSync(file, "utf-8")).toBe(CHANGELOG_WITH_UNRELEASED);
+	});
+});
+
+describe("changelog after prereleases", () => {
+	let dir: string;
+	beforeEach(() => {
+		dir = createTempRepo("1.0.1-beta.1");
+	});
+	afterEach(() => {
+		fs.rmSync(dir, { recursive: true, force: true });
+	});
+
+	test("warns that prerelease sections are not consolidated", () => {
+		const content = CHANGELOG_WITH_UNRELEASED.replace(
+			"## [1.0.0]",
+			"## [1.0.1-beta.1] - 2026-02-01\n\n- Beta fix\n\n## [1.0.0]",
+		);
+		const file = commitFile(dir, "CHANGELOG.md", content);
+		const { stderr, status } = run(["--non-interactive", "--bump", "release", "--ignore-pm"], dir);
+		expect(status).toBe(0);
+		expect(stderr).toContain("1.0.1-beta.1");
+		expect(fs.readFileSync(file, "utf-8")).toContain(`## [1.0.1] - ${today()}`);
+	});
+
+	test("warns about prerelease sections when adding a generic section", () => {
+		const content = CHANGELOG_WITH_UNRELEASED.replace("- New feature\n", "").replace(
+			"## [1.0.0]",
+			"## [1.0.1-beta.1] - 2026-02-01\n\n- Beta fix\n\n## [1.0.0]",
+		);
+		const file = commitFile(dir, "CHANGELOG.md", content);
+		const { stderr, status } = run(["--non-interactive", "--bump", "release", "--ignore-pm"], dir);
+		expect(status).toBe(0);
+		expect(stderr).toContain("1.0.1-beta.1");
+		expect(fs.readFileSync(file, "utf-8")).toContain(
+			`## [1.0.1] - ${today()}\n\nRelease 1.0.1\n\n## [1.0.1-beta.1]`,
+		);
+	});
+});
