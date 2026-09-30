@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Declare Node.js >= 20 in `engines`, as required by `commander` 14.
+- Ship `CHANGELOG.md` in the package and add repository, homepage, issues and keywords metadata for the npm page.
+
 ## [1.2.0] - 2026-09-30
 
 ### Added
