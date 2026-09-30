@@ -1,6 +1,6 @@
 # upversion
 
-A CLI utility for semantic version management in Node.js projects. It updates `package.json`, creates a git commit, generates a tag, and pushes to the remote — interactively or fully scriptable.
+A CLI utility for semantic version management in Node.js projects. It updates `package.json` and the project's [CHANGELOG](#changelog), creates a git commit, generates a tag, and pushes to the remote — interactively or fully scriptable.
 
 ## Installation
 
@@ -8,11 +8,14 @@ A CLI utility for semantic version management in Node.js projects. It updates `p
 npx upversion@latest
 ```
 
-Or globally:
+Or globally, which installs the `version` command:
 
 ```bash
 npm install -g upversion
+version --bump patch
 ```
+
+Requires Node.js 20 or later.
 
 ## Usage
 
@@ -24,10 +27,11 @@ npx upversion@latest
 
 A guided menu walks you through the release:
 
-1. Select the bump type (patch, minor, major, prerelease, advanced…)
-2. Optionally create a git tag `v<version>`
-3. Optionally push to remote
-4. Confirm before any changes are made
+1. Select the bump type (patch, minor, major, prerelease, advanced…, or the version already written in the CHANGELOG)
+2. Answer the CHANGELOG questions, if any (see [CHANGELOG](#changelog))
+3. Optionally create a git tag `v<version>`
+4. Optionally push to remote
+5. Confirm before any changes are made
 
 ### Non-interactive mode (CI / scripts)
 
@@ -36,6 +40,8 @@ All decisions can be passed as flags for automated pipelines.
 ```bash
 npx upversion@latest --non-interactive --bump patch --tag --push
 ```
+
+Without `--bump` or `--version`, it bumps `patch` (or `prerelease` from a prerelease version). On success it prints a one-line summary such as `1.2.3 => 1.2.4 (tag, push)` (`--verbose` prints each step instead). Errors go to stderr with exit code 1.
 
 ## Options
 
@@ -106,18 +112,24 @@ npx upversion@latest --non-interactive --bump release --tag --push
 
 # Patch bump including uncommitted files
 npx upversion@latest --bump patch --commit
+
+# Release the version already written in the CHANGELOG
+npx upversion@latest --non-interactive --bump changelog --tag --push
 ```
 
 ## Git behaviour
 
 - The repository **must be clean** (no uncommitted changes) before running a version bump. Use `--commit` to bypass this check and include any uncommitted changes in the release commit.
+- The release commit contains `package.json`, `pnpm-lock.yaml` when present, and the CHANGELOG when it was updated. Other lock files are not added.
 - The commit message is `Release version <x.y.z>`.
 - The tag follows the format `v<x.y.z>` (e.g. `v1.3.0-beta.2`).
 - Push sends `origin main` and, if a tag was created, `origin v<x.y.z>`.
+- If a step fails, the changes already made are rolled back: the tag is deleted, the commit is undone, and `package.json` and the CHANGELOG are restored.
+- Outside a git repository, commit, tag and push are skipped.
 
 ## `packageManager` field
 
-On each run, the `packageManager` field in `package.json` is updated with the detected package manager (via `npm_config_user_agent` or the lock file present). This behaviour can be changed:
+On each run, the `packageManager` field in `package.json` is updated with the detected package manager: from the lock file (`pnpm-lock.yaml`, `yarn.lock`, `bun.lock`/`bun.lockb`), else from `npm_config_user_agent`, else npm. Its version comes from `npm_config_user_agent` when that names the same manager, otherwise from running `<pm> --version`, which returns the globally installed version. Run the tool through your package manager (e.g. `pnpm run …` or `pnpm dlx upversion`) to record the version the project uses. This behaviour can be changed:
 
 - `--ignore-pm`: leave the field unchanged
 - `--no-pm`: remove the field entirely
