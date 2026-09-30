@@ -124,11 +124,11 @@ Each release checks the project's `CHANGELOG.md` (or `CHANGELOG`; `CHANGELOG.md`
 
 - **Section already present**: the file is left untouched.
 - **`[Unreleased]` has entries**: they are moved under a new `## [<version>] - YYYY-MM-DD` heading and an empty `## [Unreleased]` is kept.
-- **`[Unreleased]` is empty or missing**: a generic `## [<version>] - YYYY-MM-DD` section with the text `Release <version>` is added before the previous release.
+- **`[Unreleased]` is empty or missing** (empty `### Added`-style subsections and HTML comments do not count as entries): a generic `## [<version>] - YYYY-MM-DD` section with the text `Release <version>` is added before the previous release.
 - **No file**: interactive mode offers to create a `CHANGELOG.md` with a generic entry (default: no). Non-interactive mode does nothing.
-- **File not in Keep a Changelog format**: interactive mode asks whether to continue (default: no). Non-interactive mode does nothing.
+- **File not in Keep a Changelog format** (including conventional-changelog files, whose headings are links such as `## [1.0.0](…)`): interactive mode asks whether to continue (default: no). Non-interactive mode does nothing.
 
-When a section is added, the compare links at the bottom (`[unreleased]: …/compare/vX...HEAD`) are updated and the file is included in the release commit. Interactive mode asks before adding a section; if you decline, it asks whether to release without a CHANGELOG entry (default: no). Non-interactive mode adds it (with a warning for a generic section) unless `--no-auto-unreleased-bump` is passed, in which case the release fails.
+When a section is added, the file is included in the release commit. If the tag is created, the compare links at the bottom (`[unreleased]: …/compare/vX...HEAD`) are updated too; a link in another form (e.g. inline in the heading) is left as is, with a warning. Line endings (LF or CRLF) are preserved. Interactive mode asks before adding a section; if you decline, it asks whether to release without a CHANGELOG entry (default: no). Non-interactive mode adds it (with a warning for a generic section) unless `--no-auto-unreleased-bump` is passed, in which case the release fails.
 
 Releasing a stable version after prereleases (e.g. `1.2.0` with `1.2.0-beta.1` sections present) does **not** consolidate the prerelease sections. Interactive mode asks for confirmation; non-interactive mode prints a warning.
 

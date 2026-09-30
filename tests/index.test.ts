@@ -450,9 +450,9 @@ describe("changelog", () => {
 		expect(committed).toContain("CHANGELOG.md");
 	});
 
-	test("updates compare links", () => {
+	test("updates compare links when the tag is created", () => {
 		const file = commitFile(dir, "CHANGELOG.md", CHANGELOG_WITH_UNRELEASED);
-		run(["--non-interactive", "--bump", "patch", "--ignore-pm"], dir);
+		run(["--non-interactive", "--bump", "patch", "--ignore-pm", "--tag"], dir);
 		expect(fs.readFileSync(file, "utf-8")).toContain(
 			"[unreleased]: https://github.com/o/r/compare/v1.0.1...HEAD\n" +
 				"[1.0.1]: https://github.com/o/r/compare/v1.0.0...v1.0.1\n" +
@@ -487,7 +487,10 @@ describe("changelog", () => {
 	test("empty [Unreleased] gets a generic section", () => {
 		const content = CHANGELOG_WITH_UNRELEASED.replace("- New feature\n", "");
 		const file = commitFile(dir, "CHANGELOG.md", content);
-		const { stderr, status } = run(["--non-interactive", "--bump", "patch", "--ignore-pm"], dir);
+		const { stderr, status } = run(
+			["--non-interactive", "--bump", "patch", "--ignore-pm", "--tag"],
+			dir,
+		);
 		expect(status).toBe(0);
 		expect(stderr).toContain("generic section added");
 		const updated = fs.readFileSync(file, "utf-8");
@@ -570,6 +573,150 @@ describe("changelog", () => {
 		const { status } = run(["--non-interactive", "--bump", "patch", "--ignore-pm", "--tag"], dir);
 		expect(status).toBe(1);
 		expect(fs.readFileSync(file, "utf-8")).toBe(CHANGELOG_WITH_UNRELEASED);
+	});
+
+	test("failed commit leaves nothing staged", () => {
+		const file = commitFile(dir, "CHANGELOG.md", CHANGELOG_WITH_UNRELEASED);
+		const hook = path.join(dir, ".git", "hooks", "pre-commit");
+		fs.writeFileSync(hook, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+		const { stderr, status } = run(["--non-interactive", "--bump", "patch", "--ignore-pm"], dir);
+		expect(status).toBe(1);
+		expect(stderr).toContain("commit");
+		const staged = execSync("git diff --cached --name-only", { cwd: dir, encoding: "utf-8" });
+		expect(staged.trim()).toBe("");
+		expect(fs.readFileSync(file, "utf-8")).toBe(CHANGELOG_WITH_UNRELEASED);
+		const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf-8"));
+		expect(pkg.version).toBe("1.0.0");
+	});
+
+	test("leaves compare links untouched without a tag", () => {
+		const file = commitFile(dir, "CHANGELOG.md", CHANGELOG_WITH_UNRELEASED);
+		const { status } = run(["--non-interactive", "--bump", "patch", "--ignore-pm"], dir);
+		expect(status).toBe(0);
+		const updated = fs.readFileSync(file, "utf-8");
+		expect(updated).toContain(`## [1.0.1] - ${today()}`);
+		expect(updated).toContain(LINKS);
+		expect(updated).not.toContain("[1.0.1]:");
+	});
+
+	test("keeps the compare target of the [unreleased] link", () => {
+		const content = CHANGELOG_WITH_UNRELEASED.replace("v1.0.0...HEAD", "v1.0.0...main  ");
+		const file = commitFile(dir, "CHANGELOG.md", content);
+		run(["--non-interactive", "--bump", "patch", "--ignore-pm", "--tag"], dir);
+		expect(fs.readFileSync(file, "utf-8")).toContain(
+			"[unreleased]: https://github.com/o/r/compare/v1.0.1...main\n" +
+				"[1.0.1]: https://github.com/o/r/compare/v1.0.0...v1.0.1\n",
+		);
+	});
+
+	test("warns when the compare links cannot be updated", () => {
+		const content = CHANGELOG_WITH_UNRELEASED.replace(LINKS, "").replace(
+			"## [Unreleased]",
+			"## [Unreleased](https://github.com/o/r/compare/v1.0.0...HEAD)",
+		);
+		commitFile(dir, "CHANGELOG.md", content);
+		const { stderr, status } = run(
+			["--non-interactive", "--bump", "patch", "--ignore-pm", "--tag"],
+			dir,
+		);
+		expect(status).toBe(0);
+		expect(stderr).toContain("compare links");
+	});
+
+	test("adds no link to a changelog without link references", () => {
+		const content = CHANGELOG_WITH_UNRELEASED.replace(LINKS, "");
+		const file = commitFile(dir, "CHANGELOG.md", content);
+		const { stderr, status } = run(
+			["--non-interactive", "--bump", "patch", "--ignore-pm", "--tag"],
+			dir,
+		);
+		expect(status).toBe(0);
+		expect(stderr).toBe("");
+		const updated = fs.readFileSync(file, "utf-8");
+		expect(updated).toContain(`## [1.0.1] - ${today()}`);
+		expect(updated).not.toContain("[1.0.1]:");
+	});
+
+	test("ignores conventional-changelog files", () => {
+		const content =
+			"# Changelog\n\n" +
+			"### [1.0.1](https://github.com/o/r/compare/v1.0.0...v1.0.1) (2026-02-01)\n\n* fix\n\n" +
+			"## [1.0.0](https://github.com/o/r/compare/v0.1.0...v1.0.0) (2026-01-01)\n\n* feat\n";
+		const file = commitFile(dir, "CHANGELOG.md", content);
+		const { status } = run(["--non-interactive", "--bump", "minor", "--ignore-pm"], dir);
+		expect(status).toBe(0);
+		expect(fs.readFileSync(file, "utf-8")).toBe(content);
+	});
+
+	test("never inserts the generic section into the header", () => {
+		const content =
+			"# Changelog\n\nBased on [Keep a Changelog][kac].\n\n" +
+			"[kac]: https://keepachangelog.com/en/1.1.0/\n\n" +
+			"## [Unreleased]\n\n## [1.0.0] - 2026-01-01\n\n- Initial release\n";
+		const file = commitFile(dir, "CHANGELOG.md", content);
+		const { status } = run(["--non-interactive", "--bump", "patch", "--ignore-pm"], dir);
+		expect(status).toBe(0);
+		expect(fs.readFileSync(file, "utf-8")).toContain(
+			`## [Unreleased]\n\n## [1.0.1] - ${today()}\n\nRelease 1.0.1\n\n## [1.0.0]`,
+		);
+	});
+
+	test("preserves CRLF line endings", () => {
+		const content = CHANGELOG_WITH_UNRELEASED.replace(/\n/g, "\r\n");
+		const file = commitFile(dir, "CHANGELOG.md", content);
+		const { status } = run(["--non-interactive", "--bump", "patch", "--ignore-pm", "--tag"], dir);
+		expect(status).toBe(0);
+		const updated = fs.readFileSync(file, "utf-8");
+		expect(updated).toContain(`## [1.0.1] - ${today()}\r\n`);
+		expect(updated).toContain("[1.0.1]: https://github.com/o/r/compare/v1.0.0...v1.0.1\r\n");
+		expect(updated).not.toMatch(/[^\r]\n/);
+	});
+
+	test("an HTML comment alone does not count as an entry", () => {
+		const content = CHANGELOG_WITH_UNRELEASED.replace(
+			"### Added\n\n- New feature\n",
+			"<!-- add entries here -->\n",
+		);
+		const file = commitFile(dir, "CHANGELOG.md", content);
+		const { stderr, status } = run(["--non-interactive", "--bump", "patch", "--ignore-pm"], dir);
+		expect(status).toBe(0);
+		expect(stderr).toContain("generic section added");
+		expect(fs.readFileSync(file, "utf-8")).toContain(
+			`## [Unreleased]\n\n<!-- add entries here -->\n\n## [1.0.1] - ${today()}\n\nRelease 1.0.1\n`,
+		);
+	});
+
+	test("dry-run announces the generic section as pending", () => {
+		const content = CHANGELOG_WITH_UNRELEASED.replace("- New feature\n", "");
+		commitFile(dir, "CHANGELOG.md", content);
+		const { stderr, status } = run(
+			["--non-interactive", "--dry-run", "--bump", "patch", "--ignore-pm"],
+			dir,
+		);
+		expect(status).toBe(0);
+		expect(stderr).toContain("generic section will be added");
+	});
+
+	test("creates no changelog in non-interactive mode", () => {
+		const { status } = run(["--non-interactive", "--bump", "patch", "--ignore-pm"], dir);
+		expect(status).toBe(0);
+		expect(fs.existsSync(path.join(dir, "CHANGELOG.md"))).toBe(false);
+	});
+
+	test("--commit includes the changelog in the release commit", () => {
+		commitFile(dir, "CHANGELOG.md", CHANGELOG_WITH_UNRELEASED);
+		fs.writeFileSync(path.join(dir, "other.txt"), "dirty\n");
+		const { status } = run(
+			["--non-interactive", "--bump", "patch", "--ignore-pm", "--commit"],
+			dir,
+		);
+		expect(status).toBe(0);
+		const committed = execSync("git show --name-only --format= HEAD", {
+			cwd: dir,
+			encoding: "utf-8",
+		});
+		expect(committed).toContain("CHANGELOG.md");
+		expect(committed).toContain("other.txt");
 	});
 });
 

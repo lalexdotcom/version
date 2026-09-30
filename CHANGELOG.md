@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Update a Keep a Changelog `CHANGELOG.md` (or `CHANGELOG`) on release: `[Unreleased]` is assigned to the new version, or a generic section is added when it has no entries.
 - `--skip-changelog` and `--no-auto-unreleased-bump` options.
 
+### Fixed
+
+- A commit rejected by git (e.g. by a pre-commit hook) no longer leaves the release files staged after rollback.
+
+### Removed
+
+- `exports` and `types` fields from `package.json`: the package is a CLI and exports nothing.
+
 ## [1.1.1] - 2026-03-20
 
 ### Fixed

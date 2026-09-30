@@ -499,7 +499,6 @@ interface ChangelogUpdate {
 	change: string;
 }
 
-// Locate the changelog file; CHANGELOG.md wins when both exist
 function findChangelog(): string | null {
 	for (const name of ["CHANGELOG.md", "CHANGELOG"]) {
 		const file = path.join(process.cwd(), name);
@@ -508,22 +507,22 @@ function findChangelog(): string | null {
 	return null;
 }
 
-// Escape a string for literal use inside a RegExp
 function escapeRegExp(s: string): string {
 	return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// A changelog without any "## [Unreleased]" or "## [x.y.z]" heading is not ours to edit
+// conventional-changelog links its headings ("## [1.0.0](url) (date)") and writes patches as
+// "### [1.0.1](url)": editing such a file as Keep a Changelog would misplace the new section
 function isKeepAChangelog(content: string): boolean {
+	if (/^#{2,3} \[\d[^\]]*\]\(/m.test(content)) return false;
 	return /^## \[(unreleased|\d+\.\d+\.\d+[^\]]*)\]/im.test(content);
 }
 
-// Check whether the changelog already has a heading for this exact version
 function hasVersionSection(content: string, version: string): boolean {
 	return new RegExp(`^## \\[${escapeRegExp(version)}\\]`, "m").test(content);
 }
 
-// Locate the [Unreleased] body: it ends at the next release heading or at the link references
+// The body also ends at link references: [Unreleased] may be the last section of the file
 function findUnreleased(content: string): { headingEnd: number; body: string } | null {
 	const heading = /^## \[unreleased\][^\n]*/im.exec(content);
 	if (!heading) return null;
@@ -533,12 +532,14 @@ function findUnreleased(content: string): { headingEnd: number; body: string } |
 	return { headingEnd, body: end === -1 ? rest : rest.slice(0, end) };
 }
 
-// Template subsection headings ("### Added") left without items do not count as entries
+// Empty template subsections ("### Added") and HTML comment placeholders are not entries
 function hasEntries(body: string): boolean {
-	return body.split("\n").some((line) => line.trim() !== "" && !line.startsWith("### "));
+	return body
+		.replace(/<!--[\s\S]*?-->/g, "")
+		.split("\n")
+		.some((line) => line.trim() !== "" && !line.startsWith("### "));
 }
 
-// List prerelease headings (e.g. 1.2.0-beta.1) of a stable version
 function findPrereleaseSections(content: string, version: string): string[] {
 	const re = new RegExp(`^## \\[(${escapeRegExp(version)}-[^\\]]+)\\]`, "gm");
 	return Array.from(content.matchAll(re), (m) => m[1]);
@@ -551,46 +552,48 @@ function localDate(): string {
 	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-// Move [Unreleased] entries under a new version heading and re-point the compare links
 function assignUnreleased(content: string, version: string): string {
 	const unreleased = findUnreleased(content);
 	if (!unreleased) return content;
 	const { headingEnd } = unreleased;
-	return updateCompareLinks(
-		`${content.slice(0, headingEnd)}\n\n## [${version}] - ${localDate()}${content.slice(headingEnd)}`,
-		version,
-	);
+	return `${content.slice(0, headingEnd)}\n\n## [${version}] - ${localDate()}${content.slice(headingEnd)}`;
 }
 
-// Re-point the [unreleased] compare link to the new tag and add the link of the new version
-function updateCompareLinks(content: string, version: string): string {
-	return content.replace(
-		/^\[(unreleased)\]:\s*(\S+\/compare\/)(\S+)\.\.\.HEAD$/im,
-		(_, label, base, previous) =>
-			`[${label}]: ${base}v${version}...HEAD\n[${version}]: ${base}${previous}...v${version}`,
-	);
-}
-
-// Placeholder section for a release that has no entries
 function genericSection(version: string): string {
 	return `## [${version}] - ${localDate()}\n\nRelease ${version}`;
 }
 
-// Insert a generic section before the first release; empty [Unreleased] subsections stay where they are
+// Searching from the first "## " heading keeps link definitions of the intro out of the match;
+// empty [Unreleased] subsections stay where they are
 function addGenericSection(content: string, version: string): string {
-	const next = /^(## \[(?!unreleased\])|\[[^\]]+\]:)/im.exec(content);
-	const at = next ? next.index : content.length;
+	const start = Math.max(content.search(/^## /m), 0);
+	const next = /^(## \[(?!unreleased\])|\[[^\]]+\]:)/im.exec(content.slice(start));
+	const at = next ? start + next.index : content.length;
 	const before = content.slice(0, at).replace(/\n*$/, "\n\n");
 	const after = content.slice(at);
 	const section = genericSection(version);
-	return updateCompareLinks(
-		after ? `${before}${section}\n\n${after}` : `${before}${section}\n`,
-		version,
-	);
+	return after ? `${before}${section}\n\n${after}` : `${before}${section}\n`;
+}
+
+// null when an [unreleased] link exists in a form this cannot rewrite (e.g. inline in the heading),
+// so the caller can say so instead of leaving a stale link unnoticed
+function updateCompareLinks(content: string, version: string): string | null {
+	const link = /^\[(unreleased)\]:[ \t]*(\S+\/compare\/)(\S+?)\.\.\.(\S+)[ \t]*$/im;
+	if (link.test(content)) {
+		return content.replace(
+			link,
+			(_, label, base, previous, target) =>
+				`[${label}]: ${base}v${version}...${target}\n[${version}]: ${base}${previous}...v${version}`,
+		);
+	}
+	return /\[unreleased\][:(]/i.test(content) ? null : content;
 }
 
 // Decide the CHANGELOG change before any write, so a refusal aborts with nothing to roll back
-async function resolveChangelog(newVersion: string): Promise<ChangelogUpdate | null> {
+async function resolveChangelog(
+	newVersion: string,
+	tagged: boolean,
+): Promise<ChangelogUpdate | null> {
 	if (options.skipChangelog) return null;
 
 	const { confirm } = await import("@clack/prompts");
@@ -626,26 +629,26 @@ async function resolveChangelog(newVersion: string): Promise<ChangelogUpdate | n
 
 	const name = path.basename(file);
 	const original = fs.readFileSync(file, "utf-8");
-	if (!isKeepAChangelog(original)) {
+	// Edit with \n only and convert back, so inserted lines match the file's line endings
+	const crlf = original.includes("\r\n");
+	const content = crlf ? original.replace(/\r\n/g, "\n") : original;
+	if (!isKeepAChangelog(content)) {
 		if (isNonInteractive) return null;
 		if (!(await ask(`${name} is not in Keep a Changelog format. Continue anyway?`, false))) abort();
 		return null;
 	}
-	if (hasVersionSection(original, newVersion)) return null;
+	if (hasVersionSection(content, newVersion)) return null;
 
-	let update: ChangelogUpdate | null = null;
-	const unreleased = findUnreleased(original);
+	let updated: string | null = null;
+	let change = "";
+	const unreleased = findUnreleased(content);
 	if (unreleased && hasEntries(unreleased.body)) {
 		const assign = isNonInteractive
 			? options.autoUnreleasedBump
 			: await ask(`Assign [Unreleased] in ${name} to ${newVersion}?`, true);
 		if (assign) {
-			update = {
-				path: file,
-				original,
-				updated: assignUnreleased(original, newVersion),
-				change: `[Unreleased] assigned to ${newVersion}`,
-			};
+			updated = assignUnreleased(content, newVersion);
+			change = `[Unreleased] assigned to ${newVersion}`;
 		}
 	} else {
 		const add = isNonInteractive
@@ -656,18 +659,15 @@ async function resolveChangelog(newVersion: string): Promise<ChangelogUpdate | n
 				);
 		if (add) {
 			if (isNonInteractive) {
-				console.warn(`${name} has no entries for ${newVersion}: generic section added`);
+				const outcome = options.dryRun ? "will be added" : "added";
+				console.warn(`${name} has no entries for ${newVersion}: generic section ${outcome}`);
 			}
-			update = {
-				path: file,
-				original,
-				updated: addGenericSection(original, newVersion),
-				change: `generic ${newVersion} section added`,
-			};
+			updated = addGenericSection(content, newVersion);
+			change = `generic ${newVersion} section added`;
 		}
 	}
 
-	if (!update) {
+	if (updated === null) {
 		if (isNonInteractive) {
 			console.error(
 				`${name} has no section for ${newVersion}. use --skip-changelog to release without it.`,
@@ -678,7 +678,7 @@ async function resolveChangelog(newVersion: string): Promise<ChangelogUpdate | n
 		return null;
 	}
 
-	const prereleases = isPrerelease(newVersion) ? [] : findPrereleaseSections(original, newVersion);
+	const prereleases = isPrerelease(newVersion) ? [] : findPrereleaseSections(content, newVersion);
 	if (prereleases.length > 0) {
 		const found = `${prereleases.join(", ")} in ${name}`;
 		if (isNonInteractive) {
@@ -687,7 +687,25 @@ async function resolveChangelog(newVersion: string): Promise<ChangelogUpdate | n
 			abort();
 		}
 	}
-	return update;
+
+	// Without the tag, a link to v<version> would point to nothing
+	if (tagged) {
+		const linked = updateCompareLinks(updated, newVersion);
+		if (linked === null) {
+			const message = `compare links in ${name} not updated: unsupported [unreleased] link format`;
+			if (isNonInteractive) console.warn(message);
+			else console.log(`\x1b[33m⚠ ${message}\x1b[0m`);
+		} else {
+			updated = linked;
+		}
+	}
+
+	return {
+		path: file,
+		original,
+		updated: crlf ? updated.replace(/\n/g, "\r\n") : updated,
+		change,
+	};
 }
 
 // ─── Logger / template system ─────────────────────────────────────────────────
@@ -904,8 +922,6 @@ async function main() {
 		clackLog.step(`Version update: ${currentVersion} → ${newVersion}`);
 	}
 
-	const changelog = await resolveChangelog(newVersion);
-
 	let createTag = gitAvailable && options.tag;
 	if (gitAvailable && !isNonInteractive && !options.tag) {
 		const result = await confirm({
@@ -933,6 +949,8 @@ async function main() {
 		}
 		pushToRemote = result;
 	}
+
+	const changelog = await resolveChangelog(newVersion, createTag);
 
 	// ── Phase 2: Confirmation (interactive, non-dry-run) ────────────────────
 	if (!isNonInteractive && !dryRun) {
@@ -965,6 +983,7 @@ async function main() {
 	let changelogUpdated = false;
 	let committed = false;
 	let tagged = false;
+	let staged: string[] = [];
 
 	const rollback = (step: string, err: Error): never => {
 		try {
@@ -972,6 +991,10 @@ async function main() {
 		} catch {}
 		try {
 			if (committed) execSync("git reset HEAD~1", { stdio: "pipe" });
+			// A rejected commit (e.g. by a pre-commit hook) leaves the bumped files staged; only the
+			// release files are unstaged, so what the user staged with --commit stays as it was
+			else if (staged.length > 0)
+				execSync(`git reset -q -- ${staged.join(" ")}`, { stdio: "pipe" });
 		} catch {}
 		try {
 			if (packageJsonUpdated) fs.writeFileSync(packagePath, originalPackageJson);
@@ -1032,17 +1055,16 @@ async function main() {
 		log("committing");
 		if (!dryRun) {
 			try {
-				if (hasUncommittedChanges) {
-					execSync("git add .", { stdio: "pipe" });
-				} else {
-					const filesToAdd = ["package.json"];
-					const lockFile = "pnpm-lock.yaml";
-					if (fs.existsSync(path.join(process.cwd(), lockFile))) {
-						filesToAdd.push(lockFile);
-					}
-					if (changelog) filesToAdd.push(path.basename(changelog.path));
-					execSync(`git add ${filesToAdd.join(" ")}`, { stdio: "pipe" });
+				const releaseFiles = ["package.json"];
+				const lockFile = "pnpm-lock.yaml";
+				if (fs.existsSync(path.join(process.cwd(), lockFile))) {
+					releaseFiles.push(lockFile);
 				}
+				if (changelog) releaseFiles.push(path.basename(changelog.path));
+				execSync(hasUncommittedChanges ? "git add ." : `git add ${releaseFiles.join(" ")}`, {
+					stdio: "pipe",
+				});
+				staged = releaseFiles;
 				execSync(`git commit -m "Release version ${newVersion}"`, {
 					stdio: "pipe",
 				});
