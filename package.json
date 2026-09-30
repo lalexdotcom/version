@@ -6,7 +6,8 @@
 		"version": "./dist/index.js"
 	},
 	"files": [
-		"dist"
+		"dist",
+		"CHANGELOG.md"
 	],
 	"publishConfig": {
 		"access": "public"
@@ -44,5 +45,27 @@
 	"author": {
 		"name": "Alexandre LEGOUT",
 		"url": "https://github.com/lalexdotcom"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/lalexdotcom/version.git"
+	},
+	"homepage": "https://github.com/lalexdotcom/version#readme",
+	"bugs": {
+		"url": "https://github.com/lalexdotcom/version/issues"
+	},
+	"keywords": [
+		"version",
+		"semver",
+		"bump",
+		"release",
+		"changelog",
+		"keep-a-changelog",
+		"git",
+		"tag",
+		"cli"
+	],
+	"engines": {
+		"node": ">=20"
 	}
 }
