@@ -590,10 +590,7 @@ function updateCompareLinks(content: string, version: string): string | null {
 }
 
 // Decide the CHANGELOG change before any write, so a refusal aborts with nothing to roll back
-async function resolveChangelog(
-	newVersion: string,
-	tagged: boolean,
-): Promise<ChangelogUpdate | null> {
+async function resolveChangelog(newVersion: string): Promise<ChangelogUpdate | null> {
 	if (options.skipChangelog) return null;
 
 	const { confirm } = await import("@clack/prompts");
@@ -688,24 +685,29 @@ async function resolveChangelog(
 		}
 	}
 
-	// Without the tag, a link to v<version> would point to nothing
-	if (tagged) {
-		const linked = updateCompareLinks(updated, newVersion);
-		if (linked === null) {
-			const message = `compare links in ${name} not updated: unsupported [unreleased] link format`;
-			if (isNonInteractive) console.warn(message);
-			else console.log(`\x1b[33m⚠ ${message}\x1b[0m`);
-		} else {
-			updated = linked;
-		}
-	}
-
 	return {
 		path: file,
 		original,
 		updated: crlf ? updated.replace(/\n/g, "\r\n") : updated,
 		change,
 	};
+}
+
+// Applied once the tag prompt is answered, not in resolveChangelog: the changelog questions must
+// come before tag and push, yet without the tag a link to v<version> would point to nothing
+function linkChangelog(update: ChangelogUpdate, version: string): ChangelogUpdate {
+	const crlf = update.updated.includes("\r\n");
+	const linked = updateCompareLinks(
+		crlf ? update.updated.replace(/\r\n/g, "\n") : update.updated,
+		version,
+	);
+	if (linked === null) {
+		const message = `compare links in ${path.basename(update.path)} not updated: unsupported [unreleased] link format`;
+		if (isNonInteractive) console.warn(message);
+		else console.log(`\x1b[33m⚠ ${message}\x1b[0m`);
+		return update;
+	}
+	return { ...update, updated: crlf ? linked.replace(/\n/g, "\r\n") : linked };
 }
 
 // ─── Logger / template system ─────────────────────────────────────────────────
@@ -922,6 +924,8 @@ async function main() {
 		clackLog.step(`Version update: ${currentVersion} → ${newVersion}`);
 	}
 
+	const resolvedChangelog = await resolveChangelog(newVersion);
+
 	let createTag = gitAvailable && options.tag;
 	if (gitAvailable && !isNonInteractive && !options.tag) {
 		const result = await confirm({
@@ -950,7 +954,10 @@ async function main() {
 		pushToRemote = result;
 	}
 
-	const changelog = await resolveChangelog(newVersion, createTag);
+	const changelog =
+		resolvedChangelog && createTag
+			? linkChangelog(resolvedChangelog, newVersion)
+			: resolvedChangelog;
 
 	// ── Phase 2: Confirmation (interactive, non-dry-run) ────────────────────
 	if (!isNonInteractive && !dryRun) {
