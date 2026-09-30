@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-30
+
 ### Added
 
 - Update a Keep a Changelog `CHANGELOG.md` (or `CHANGELOG`) on release: `[Unreleased]` is assigned to the new version, or a generic section is added when it has no entries.
@@ -49,7 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First release as `upversion` (previously `@lalex/version`): bump `package.json`, update `packageManager`, commit, tag and push, interactively or with `--non-interactive`.
 
-[unreleased]: https://github.com/lalexdotcom/version/compare/v1.1.1...HEAD
+[unreleased]: https://github.com/lalexdotcom/version/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/lalexdotcom/version/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/lalexdotcom/version/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/lalexdotcom/version/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/lalexdotcom/version/releases/tag/v1.0.1
