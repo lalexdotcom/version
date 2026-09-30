@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Update a Keep a Changelog `CHANGELOG.md` (or `CHANGELOG`) on release: `[Unreleased]` is assigned to the new version, or a generic section is added when it has no entries.
 - `--skip-changelog` and `--no-auto-unreleased-bump` options.
+- `--bump changelog` and a "Changelog" menu entry to release the version already written in the CHANGELOG.
 
 ### Fixed
 

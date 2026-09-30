@@ -82,6 +82,10 @@ npx upversion@latest --non-interactive --bump patch --tag --push
 
 Prerelease levels follow the order `alpha` → `beta` → `rc`. Regressions are rejected.
 
+### From the CHANGELOG
+
+`changelog` releases the highest version that already has a section in the [CHANGELOG](#changelog) (e.g. `## [1.3.0] - 2026-04-01`), whatever its position; `[Unreleased]` is ignored. It fails if there is no CHANGELOG, if it is not in Keep a Changelog format, if it has no release section, or if that version is not greater than the current one. In interactive mode, the same version is offered as the first menu entry when it is a valid target.
+
 ## Examples
 
 ```bash

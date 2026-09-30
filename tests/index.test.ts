@@ -1,43 +1,16 @@
-import { execSync, spawnSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "@rstest/core";
-
-const CLI = path.resolve(import.meta.dirname, "../dist/index.js");
-// biome-ignore lint/suspicious/noControlCharactersInRegex: \x1b is the ANSI escape character
-const ANSI_RE = /\x1b\[[0-9;]*m/g;
-
-function strip(s: string): string {
-	return s.replace(ANSI_RE, "");
-}
-
-function createTempRepo(version = "1.0.0"): string {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "version-test-"));
-	fs.writeFileSync(
-		path.join(dir, "package.json"),
-		`${JSON.stringify({ name: "test-pkg", version }, null, "\t")}\n`,
-	);
-	execSync("git init", { cwd: dir, stdio: "pipe" });
-	execSync('git config user.email "test@test.com"', {
-		cwd: dir,
-		stdio: "pipe",
-	});
-	execSync('git config user.name "Test"', { cwd: dir, stdio: "pipe" });
-	execSync("git add .", { cwd: dir, stdio: "pipe" });
-	execSync('git commit -m "init"', { cwd: dir, stdio: "pipe" });
-	return dir;
-}
-
-function run(args: string[], cwd: string) {
-	const { stdout, stderr, status } = spawnSync("node", [CLI, ...args], {
-		cwd,
-		encoding: "utf-8",
-		// Clear user agent so PM detection relies only on lock files
-		env: { ...process.env, npm_config_user_agent: undefined },
-	});
-	return { stdout: stdout ?? "", stderr: stderr ?? "", status: status ?? 1 };
-}
+import {
+	CHANGELOG_WITH_UNRELEASED,
+	commitFile,
+	createTempRepo,
+	LINKS,
+	run,
+	strip,
+	today,
+} from "./helpers";
 
 // ─── Stable bumps ─────────────────────────────────────────────────────────────
 
@@ -395,38 +368,6 @@ describe("rollback on error", () => {
 
 // ─── CHANGELOG ────────────────────────────────────────────────────────────────
 
-const LINKS =
-	"[unreleased]: https://github.com/o/r/compare/v1.0.0...HEAD\n" +
-	"[1.0.0]: https://github.com/o/r/releases/tag/v1.0.0\n";
-
-const CHANGELOG_WITH_UNRELEASED = `# Changelog
-
-## [Unreleased]
-
-### Added
-
-- New feature
-
-## [1.0.0] - 2026-01-01
-
-- Initial release
-
-${LINKS}`;
-
-function today(): string {
-	const d = new Date();
-	const pad = (n: number) => String(n).padStart(2, "0");
-	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-function commitFile(dir: string, name: string, content: string): string {
-	const file = path.join(dir, name);
-	fs.writeFileSync(file, content);
-	execSync("git add .", { cwd: dir, stdio: "pipe" });
-	execSync(`git commit -m "add ${name}"`, { cwd: dir, stdio: "pipe" });
-	return file;
-}
-
 describe("changelog", () => {
 	let dir: string;
 	beforeEach(() => {
@@ -753,5 +694,87 @@ describe("changelog after prereleases", () => {
 		expect(fs.readFileSync(file, "utf-8")).toContain(
 			`## [1.0.1] - ${today()}\n\nRelease 1.0.1\n\n## [1.0.1-beta.1]`,
 		);
+	});
+});
+
+describe("--bump changelog", () => {
+	let dir: string;
+	beforeEach(() => {
+		dir = createTempRepo("1.0.0");
+	});
+	afterEach(() => {
+		fs.rmSync(dir, { recursive: true, force: true });
+	});
+
+	const WITH_1_2_0 = CHANGELOG_WITH_UNRELEASED.replace(
+		"## [1.0.0]",
+		"## [1.2.0] - 2026-04-01\n\n- Big feature\n\n## [1.0.0]",
+	);
+
+	test("releases the changelog version and leaves the file untouched", () => {
+		const file = commitFile(dir, "CHANGELOG.md", WITH_1_2_0);
+		const { stdout, status } = run(
+			["--non-interactive", "--bump", "changelog", "--ignore-pm"],
+			dir,
+		);
+		expect(status).toBe(0);
+		expect(stdout.trim()).toBe("1.0.0 => 1.2.0");
+		expect(fs.readFileSync(file, "utf-8")).toBe(WITH_1_2_0);
+	});
+
+	test("takes the highest valid version whatever the section order", () => {
+		const content = CHANGELOG_WITH_UNRELEASED.replace(
+			LINKS,
+			"## [2.0.0-next.1]\n\n- Not a valid target\n\n" +
+				"## [1.2.0] - 2026-04-01\n\n- Big feature\n\n" +
+				"## [1.1.0] - 2026-03-01\n\n- Feature\n\n" +
+				LINKS,
+		);
+		commitFile(dir, "CHANGELOG.md", content);
+		const { stdout, status } = run(
+			["--non-interactive", "--dry-run", "--bump", "changelog", "--ignore-pm"],
+			dir,
+		);
+		expect(status).toBe(0);
+		expect(strip(stdout)).toContain("version update: 1.0.0 => 1.2.0");
+	});
+
+	test("fails without a changelog", () => {
+		const { stderr, status } = run(
+			["--non-interactive", "--dry-run", "--bump", "changelog", "--ignore-pm"],
+			dir,
+		);
+		expect(status).toBe(1);
+		expect(stderr).toContain("no CHANGELOG found");
+	});
+
+	test("fails on a changelog not in Keep a Changelog format", () => {
+		commitFile(dir, "CHANGELOG.md", "# History\n\n1.2.0: big feature\n");
+		const { stderr, status } = run(
+			["--non-interactive", "--dry-run", "--bump", "changelog", "--ignore-pm"],
+			dir,
+		);
+		expect(status).toBe(1);
+		expect(stderr).toContain("not in Keep a Changelog format");
+	});
+
+	test("fails on a changelog without release section", () => {
+		commitFile(dir, "CHANGELOG.md", "# Changelog\n\n## [Unreleased]\n\n- New feature\n");
+		const { stderr, status } = run(
+			["--non-interactive", "--dry-run", "--bump", "changelog", "--ignore-pm"],
+			dir,
+		);
+		expect(status).toBe(1);
+		expect(stderr).toContain("has no release section");
+	});
+
+	test("fails when the changelog version is not greater", () => {
+		commitFile(dir, "CHANGELOG.md", CHANGELOG_WITH_UNRELEASED);
+		const { stderr, status } = run(
+			["--non-interactive", "--dry-run", "--bump", "changelog", "--ignore-pm"],
+			dir,
+		);
+		expect(status).toBe(1);
+		expect(stderr).toContain("must be strictly greater");
 	});
 });

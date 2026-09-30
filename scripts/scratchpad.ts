@@ -65,6 +65,15 @@ const FIXTURES: Record<string, Fixture> = {
 			),
 		},
 	},
+	"changelog-version": {
+		version: "1.0.0",
+		files: {
+			"CHANGELOG.md": WITH_UNRELEASED.replace(
+				"## [1.0.0]",
+				"## [1.1.0] - 2026-04-01\n\n### Added\n\n- Prepared by hand\n\n## [1.0.0]",
+			),
+		},
+	},
 	"no-extension": { version: "1.0.0", files: { CHANGELOG: WITH_UNRELEASED } },
 	"both-files": {
 		version: "1.0.0",

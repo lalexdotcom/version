@@ -40,7 +40,7 @@ program
 	.option("--push", "Push commit and tag to remote", false)
 	.option(
 		"--bump <type>",
-		"Bump type: patch, minor, major, prerelease[+alpha|beta|rc|next], release",
+		"Bump type: patch, minor, major, prerelease[+alpha|beta|rc|next], release, changelog",
 	)
 	.option(
 		"--version <version>",
@@ -238,6 +238,7 @@ async function selectManualVersion(): Promise<string> {
 
 // Resolve new version from CLI --bump flag
 function resolveVersionFromCLIBump(current: string, bump: string): string {
+	if (bump === "changelog") return getChangelogVersion();
 	const [base, preid] = bump.split("+");
 	const parts = parseVersion(current);
 	const currentType = getPrereleaseType(current);
@@ -326,6 +327,7 @@ async function selectBumpTypeStable(currentVersion: string): Promise<string> {
 	const choice = await select({
 		message: "Select version bump type:",
 		options: [
+			...changelogMenuOption(currentVersion),
 			{ value: "patch", label: `Patch     (${currentVersion} → ${patchVer})` },
 			{ value: "minor", label: `Minor     (${currentVersion} → ${minorVer})` },
 			{ value: "major", label: `Major     (${currentVersion} → ${majorVer})` },
@@ -380,6 +382,7 @@ async function selectBumpTypePrerelease(currentVersion: string): Promise<string>
 	const incrVer = `${baseVersion}-${type}.${number + 1}`;
 
 	const options: Array<{ value: string; label: string }> = [
+		...changelogMenuOption(currentVersion),
 		{
 			value: "prerelease",
 			label: `Increment  (${currentVersion} → ${incrVer})`,
@@ -543,6 +546,31 @@ function hasEntries(body: string): boolean {
 function findPrereleaseSections(content: string, version: string): string[] {
 	const re = new RegExp(`^## \\[(${escapeRegExp(version)}-[^\\]]+)\\]`, "gm");
 	return Array.from(content.matchAll(re), (m) => m[1]);
+}
+
+// The highest version rather than the first heading, so a misordered file cannot pick an older release;
+// throws the reason so --bump changelog can report it and the menus can hide the option
+function getChangelogVersion(): string {
+	const file = findChangelog();
+	if (!file) throw new Error("no CHANGELOG found");
+	const name = path.basename(file);
+	const content = fs.readFileSync(file, "utf-8");
+	if (!isKeepAChangelog(content)) throw new Error(`${name} is not in Keep a Changelog format`);
+	const versions = Array.from(content.matchAll(/^## \[([^\]]+)\]/gm), (m) => m[1]).filter(
+		(v) => validateVersion(v).valid,
+	);
+	if (versions.length === 0) throw new Error(`${name} has no release section`);
+	return versions.reduce((highest, v) => (isVersionGreater(v, highest) ? v : highest));
+}
+
+function changelogMenuOption(currentVersion: string): Array<{ value: string; label: string }> {
+	try {
+		const version = getChangelogVersion();
+		if (isVersionGreater(version, currentVersion)) {
+			return [{ value: "changelog", label: `Changelog  (${currentVersion} → ${version})` }];
+		}
+	} catch {}
+	return [];
 }
 
 // Local date, not toISOString(): a release made late in the evening must not be dated tomorrow

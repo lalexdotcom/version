@@ -8,7 +8,7 @@
   - Add a key to `MessageKey`, then a template (string or `(vars) => string`) in each relevant `ModeConfig`: `interactiveConfig` (✓/→ glyphs, ANSI), `nonInteractiveConfig` (only `summary`), `nonInteractiveVerboseConfig` (lowercase, no glyphs).
   - Template vars are strings only (booleans passed as `"true"`/`"false"`).
   - `dryRunOmit` hides "in-progress" keys in dry-run; `log()` with no key = blank line (interactive only).
-- Menus (`selectBumpType*`, `selectAdvancedMenu*`, `selectManualVersion`) return either a bump token (`patch`, `prerelease+beta`, `release`, …) or a literal version; `main` distinguishes by `/^\d+\.\d+\.\d+/`. Bump tokens are resolved by `resolveVersionFromCLIBump`.
+- Menus (`selectBumpType*`, `selectAdvancedMenu*`, `selectManualVersion`) return either a bump token (`patch`, `prerelease+beta`, `release`, …) or a literal version; `main` distinguishes by `/^\d+\.\d+\.\d+/`. Bump tokens are resolved by `resolveVersionFromCLIBump`; the `changelog` token reads the highest valid `## [x.y.z]` of the CHANGELOG (`getChangelogVersion`, throws the reason) and is offered first in both main menus by `changelogMenuOption` when greater than the current version.
 - Cancel in clack (`isCancel`) → message + `process.exit(0)`.
 - Exit codes are part of the contract (tested): see `mem:core` invariants.
 
