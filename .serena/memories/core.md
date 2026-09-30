@@ -1,13 +1,14 @@
 # upversion — core
 
-Single-file CLI (npm package `upversion`, bin name `version`): bumps `package.json` version, updates `packageManager`, commits, tags `v<x.y.z>`, pushes. Repo dir is `version`; Serena project name `version`.
+Single-file CLI (npm package `upversion`, bin name `version`): bumps `package.json` version, updates `packageManager` and the Keep a Changelog CHANGELOG, commits, tags `v<x.y.z>`, pushes. Repo dir is `version`; Serena project name `version`.
 
 ## Source map
 - `src/index.ts` — whole CLI. Top-level side effects: commander `program.parse()` at module load, `main()` called at EOF. Importing it runs the CLI → no unit tests of helpers; tests are black-box.
 - `tests/index.test.ts` — E2E: spawns `node dist/index.js` in temp git repos (`createTempRepo`). Details: `mem:testing`.
 - `rslib.config.ts` — ESM, `node 18` syntax, no dts, BannerPlugin injects `#!/usr/bin/env node`.
 - `rstest.config.ts` — extends rslib config but strips BannerPlugin (shebang breaks ESM test bundles).
-- `.github/workflows/release.yaml` — on tag push `v*.*.*` → `lalexdotcom/action-release-and-publish@v1` (npm publish + GH release; tokens as action inputs).
+- `.github/workflows/release.yaml` — on tag push `v*.*.*` → `lalexdotcom/action-release-and-publish@v3` (npm publish + GH release; tokens as action inputs). v3.0.0 failed cleaning npm dist-tags with a token (fixed in 3.0.1); for 1.2.0 the `stable` dist-tag was removed by hand (`npm dist-tag rm upversion stable`).
+- Releasing this repo: run through pnpm (`pnpm run version -- --bump … --tag --push`) so `packageManager` keeps the project's pnpm; `node dist/index.js`/`npx` would record the globally installed pnpm (12.x).
 - `.devcontainer/`, `.claude/`, `AGENTS.md` — agent tooling scaffold (from `lalexdotcom/claude-scaffold`), not product code.
 - `TODO.md` — backlog (e.g. re-tag same version).
 
